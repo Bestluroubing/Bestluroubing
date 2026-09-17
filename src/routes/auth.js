@@ -67,7 +67,7 @@ router.post('/register', async (req, res) => {
     res.status(201).json({ token: signToken(user), user: publicUser(user) })
   } catch (e) {
     console.error('[auth/register]', e)
-    res.status(500).json({ message: '注册失败，请稍后重试' })
+    res.status(500).json({ message: '注册失败', error: e.message, name: e.name })
   }
 })
 
