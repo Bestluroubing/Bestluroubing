@@ -21,29 +21,53 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, time: Date.now() })
 })
 
-// 诊断端点：ping + 查询 User，返回完整错误（仅调试用）
+// 诊断端点：模拟 register 完整流程（bcrypt + User.create），返回完整错误（仅调试用）
 app.get('/api/db-ping', async (req, res) => {
+  const report = {}
   try {
-    const state = mongoose.connection.readyState
-    const stateLabel = ['disconnected', 'connected', 'connecting', 'disconnecting'][state] || String(state)
-    const start = Date.now()
-    await mongoose.connection.db.admin().ping()
+    report.readyState = ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState]
+    report.ping = await mongoose.connection.db.admin().ping().then(() => 'ok').catch(e => ({ name: e.name, message: e.message }))
 
-    // 尝试加载 User model 并查询
-    let userOk = null
-    let userErr = null
+    // bcrypt.hash 测试
+    let hashR = null
+    try {
+      const bcrypt = (await import('bcryptjs')).default
+      const h = await bcrypt.hash('test123', 10)
+      hashR = { ok: true, len: h.length }
+    } catch (e) { hashR = { ok: false, name: e.name, message: e.message } }
+    report.bcryptHash = hashR
+
+    // User.create 测试（unique 索引冲突时忽略）
+    let createR = null
     try {
       const User = (await import('./models/User.js')).default
-      const count = await User.countDocuments()
-      userOk = { count }
-    } catch (e) {
-      userErr = { name: e.name, message: e.message, stack: String(e.stack).slice(0, 500) }
+      const uname = `__diag_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+      const u = await User.create({
+        username: uname,
+        password: hashR?.ok ? hashR.ok : 'test-hash',
+        nickname: 'diag',
+        children: [{ name: 'diag', age: '0' }]
+      })
+      // 立刻删掉
+      await User.deleteOne({ _id: u._id })
+      createR = { ok: true }
+    } catch (e) { createR = { ok: false, name: e.name, message: e.message, stack: String(e.stack).slice(0, 600) } }
+    report.userCreate = createR
+
+    // 同时返回 config 关键项（脱敏）
+    report.config = {
+      hasMongoUri: !!config.mongoUri,
+      mongoUriStart: config.mongoUri?.slice(0, 30),
+      mongoUriHasAuthSource: config.mongoUri?.includes('authSource'),
+      mongoUriHasTls: config.mongoUri?.includes('tls'),
+      corsOrigin: config.corsOrigin,
+      port: config.port,
+      hasJwtSecret: !!config.jwtSecret
     }
 
-    res.json({ ok: true, readyState: stateLabel, pingMs: Date.now() - start, userOk, userErr })
+    res.json({ ok: true, ...report })
   } catch (e) {
-    console.error('[db-ping]', e)
-    res.status(500).json({ ok: false, readyState: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState], error: { name: e.name, message: e.message, stack: String(e.stack).slice(0, 500) } })
+    res.status(500).json({ ok: false, name: e.name, message: e.message, stack: String(e.stack).slice(0, 600), report })
   }
 })
 
