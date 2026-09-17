@@ -21,17 +21,29 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, time: Date.now() })
 })
 
-// 诊断端点：直接 ping MongoDB，返回连接状态与错误信息（仅调试用）
+// 诊断端点：ping + 查询 User，返回完整错误（仅调试用）
 app.get('/api/db-ping', async (req, res) => {
   try {
     const state = mongoose.connection.readyState
     const stateLabel = ['disconnected', 'connected', 'connecting', 'disconnecting'][state] || String(state)
     const start = Date.now()
     await mongoose.connection.db.admin().ping()
-    res.json({ ok: true, readyState: stateLabel, ms: Date.now() - start })
+
+    // 尝试加载 User model 并查询
+    let userOk = null
+    let userErr = null
+    try {
+      const User = (await import('./models/User.js')).default
+      const count = await User.countDocuments()
+      userOk = { count }
+    } catch (e) {
+      userErr = { name: e.name, message: e.message, stack: String(e.stack).slice(0, 500) }
+    }
+
+    res.json({ ok: true, readyState: stateLabel, pingMs: Date.now() - start, userOk, userErr })
   } catch (e) {
     console.error('[db-ping]', e)
-    res.status(500).json({ ok: false, readyState: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState], error: e.message, name: e.name })
+    res.status(500).json({ ok: false, readyState: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState], error: { name: e.name, message: e.message, stack: String(e.stack).slice(0, 500) } })
   }
 })
 
