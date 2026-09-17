@@ -16,59 +16,16 @@ app.use(cors({
 }))
 app.use(express.json({ limit: '2mb' }))
 
-// 健康检查，部署平台探活与前端可用性探测都走这里
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, time: Date.now() })
-})
-
-// 诊断端点：模拟 register 完整流程（bcrypt + User.create），返回完整错误（仅调试用）
-app.get('/api/db-ping', async (req, res) => {
-  const report = {}
+// 健康检查：同时 ping MongoDB，供部署平台探活与前端可用性探测
+app.get('/api/health', async (req, res) => {
+  const state = mongoose.connection.readyState
+  const stateLabel = ['disconnected', 'connected', 'connecting', 'disconnecting'][state] || String(state)
+  let dbOk = false
   try {
-    report.readyState = ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState]
-    report.ping = await mongoose.connection.db.admin().ping().then(() => 'ok').catch(e => ({ name: e.name, message: e.message }))
-
-    // bcrypt.hash 测试
-    let hashR = null
-    try {
-      const bcrypt = (await import('bcryptjs')).default
-      const h = await bcrypt.hash('test123', 10)
-      hashR = { ok: true, len: h.length }
-    } catch (e) { hashR = { ok: false, name: e.name, message: e.message } }
-    report.bcryptHash = hashR
-
-    // User.create 测试（unique 索引冲突时忽略）
-    let createR = null
-    try {
-      const User = (await import('./models/User.js')).default
-      const uname = `__diag_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
-      const u = await User.create({
-        username: uname,
-        password: hashR?.ok ? hashR.ok : 'test-hash',
-        nickname: 'diag',
-        children: [{ name: 'diag', age: '0' }]
-      })
-      // 立刻删掉
-      await User.deleteOne({ _id: u._id })
-      createR = { ok: true }
-    } catch (e) { createR = { ok: false, name: e.name, message: e.message, stack: String(e.stack).slice(0, 600) } }
-    report.userCreate = createR
-
-    // 同时返回 config 关键项（脱敏）
-    report.config = {
-      hasMongoUri: !!config.mongoUri,
-      mongoUriStart: config.mongoUri?.slice(0, 30),
-      mongoUriHasAuthSource: config.mongoUri?.includes('authSource'),
-      mongoUriHasTls: config.mongoUri?.includes('tls'),
-      corsOrigin: config.corsOrigin,
-      port: config.port,
-      hasJwtSecret: !!config.jwtSecret
-    }
-
-    res.json({ ok: true, ...report })
-  } catch (e) {
-    res.status(500).json({ ok: false, name: e.name, message: e.message, stack: String(e.stack).slice(0, 600), report })
-  }
+    await mongoose.connection.db.admin().ping()
+    dbOk = true
+  } catch {}
+  res.json({ ok: true, db: dbOk, dbState: stateLabel, time: Date.now() })
 })
 
 app.use('/api/auth', authRoutes)
