@@ -92,6 +92,50 @@ router.get('/records', async (req, res) => {
   }
 })
 
+// 删除单条记录
+router.delete('/records/:id', async (req, res) => {
+  try {
+    const doc = await Record.findByIdAndDelete(req.params.id)
+    if (!doc) return res.status(404).json({ message: '记录不存在' })
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('[admin/records:delete]', e)
+    res.status(500).json({ message: '删除记录失败' })
+  }
+})
+
+// 删除账号（同时级联删除该账号的所有评估记录）
+router.delete('/users/:id', async (req, res) => {
+  try {
+    if (String(req.user.id) === req.params.id) {
+      return res.status(400).json({ message: '不能删除当前登录账号' })
+    }
+    const user = await User.findByIdAndDelete(req.params.id)
+    if (!user) return res.status(404).json({ message: '账号不存在' })
+    const { deletedCount } = await Record.deleteMany({ userId: req.params.id })
+    res.json({ ok: true, deletedRecords: deletedCount })
+  } catch (e) {
+    console.error('[admin/users:delete]', e)
+    res.status(500).json({ message: '删除账号失败' })
+  }
+})
+
+// 删除账号下某个被试儿童档案
+router.delete('/users/:userId/children/:childId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId)
+    if (!user) return res.status(404).json({ message: '账号不存在' })
+    const child = user.children.id(req.params.childId)
+    if (!child) return res.status(404).json({ message: '被试不存在' })
+    child.deleteOne()
+    await user.save()
+    res.json({ ok: true, children: user.children })
+  } catch (e) {
+    console.error('[admin/children:delete]', e)
+    res.status(500).json({ message: '删除被试失败' })
+  }
+})
+
 // 全量导出：所有账号所有记录，支持筛选同 /records
 router.get('/export', async (req, res) => {
   try {
