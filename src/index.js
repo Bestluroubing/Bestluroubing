@@ -1,5 +1,6 @@
 import express from 'express'
 import cors from 'cors'
+import mongoose from 'mongoose'
 import { config } from './config.js'
 import { connectDB } from './db.js'
 import authRoutes from './routes/auth.js'
@@ -18,6 +19,20 @@ app.use(express.json({ limit: '2mb' }))
 // 健康检查，部署平台探活与前端可用性探测都走这里
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, time: Date.now() })
+})
+
+// 诊断端点：直接 ping MongoDB，返回连接状态与错误信息（仅调试用）
+app.get('/api/db-ping', async (req, res) => {
+  try {
+    const state = mongoose.connection.readyState
+    const stateLabel = ['disconnected', 'connected', 'connecting', 'disconnecting'][state] || String(state)
+    const start = Date.now()
+    await mongoose.connection.db.admin().ping()
+    res.json({ ok: true, readyState: stateLabel, ms: Date.now() - start })
+  } catch (e) {
+    console.error('[db-ping]', e)
+    res.status(500).json({ ok: false, readyState: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState], error: e.message, name: e.name })
+  }
 })
 
 app.use('/api/auth', authRoutes)
