@@ -1,12 +1,43 @@
 import { Router } from 'express'
 import User from '../models/User.js'
 import Record from '../models/Record.js'
+import Override from '../models/Override.js'
 import { requireAuth } from '../middleware/auth.js'
 import { requireAdmin } from '../middleware/admin.js'
 import { toRows, buildCsv, buildXlsx } from '../utils/export.js'
 
 const router = Router()
 router.use(requireAuth, requireAdmin)
+
+// 题库答案覆盖：按模块查询 / 保存
+router.get('/overrides', async (req, res) => {
+  try {
+    const q = req.query.moduleId ? { moduleId: req.query.moduleId } : {}
+    const items = await Override.find(q).lean()
+    res.json({ items })
+  } catch (e) {
+    console.error('[admin/overrides:list]', e)
+    res.status(500).json({ message: '查询覆盖失败' })
+  }
+})
+
+router.put('/overrides', async (req, res) => {
+  try {
+    const { trialId, moduleId, correct } = req.body || {}
+    if (!trialId || !moduleId || !correct) {
+      return res.status(400).json({ message: '缺少必要字段' })
+    }
+    const updated = await Override.findOneAndUpdate(
+      { trialId, moduleId },
+      { correct, updatedBy: req.user?.username || '', updatedAt: new Date() },
+      { upsert: true, new: true }
+    )
+    res.json({ ok: true, item: updated })
+  } catch (e) {
+    console.error('[admin/overrides:save]', e)
+    res.status(500).json({ message: '保存覆盖失败' })
+  }
+})
 
 // 统计概览：账号总数、记录总数、各模块分布、儿童总数
 router.get('/stats', async (req, res) => {

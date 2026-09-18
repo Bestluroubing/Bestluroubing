@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.js'
 import recordRoutes from './routes/records.js'
 import bankRoutes from './routes/banks.js'
 import adminRoutes from './routes/admin.js'
+import Override from './models/Override.js'
 
 const app = express()
 
@@ -32,6 +33,22 @@ app.use('/api/auth', authRoutes)
 app.use('/api/records', recordRoutes)
 app.use('/api/banks', bankRoutes)
 app.use('/api/admin', adminRoutes)
+
+// 题库答案覆盖（公开读，运行时合并用）
+app.get('/api/overrides', async (req, res) => {
+  try {
+    const items = await Override.find().select('-_id trialId moduleId correct').lean()
+    const map = {}
+    for (const o of items) {
+      const key = `${o.moduleId}:${o.trialId}`
+      map[key] = o.correct
+    }
+    res.json({ map })
+  } catch (e) {
+    console.error('[overrides]', e)
+    res.json({ map: {} })
+  }
+})
 
 // 未匹配的 API 路径统一返回 404 JSON
 app.use('/api', (req, res) => {
